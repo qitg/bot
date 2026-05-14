@@ -6,14 +6,12 @@ import json
 import os
 import time
 import threading
-from flask import Flask, render_template_string, request
 
 # ========== КОНФИГ ==========
 TOKEN = "8307596159:AAES-a6TjEaAaP_j6LPogq2Eb9vsoBqtL4o"
 ADMIN_ID = 7072265211
 
 bot = telebot.TeleBot(TOKEN)
-app = Flask(__name__)
 
 def get_time():
     return datetime.utcnow() + timedelta(hours=3)
@@ -161,7 +159,6 @@ def register_new_user(user_id, name):
         save_data()
         bot.send_message(ADMIN_ID, f"🆕 Новый пользователь: {name} (ID: `{uid}`)", parse_mode='Markdown')
 
-# ========== ВЫДАЧА БИЛЕТА (ТАК КАК ТЫ ХОЧЕШЬ) ==========
 def issue_ticket(chat_id, user_id, cod, name):
     try:
         msg = bot.send_message(chat_id, "🔄 Cererea dumneavoastră este în curs de procesare...")
@@ -184,242 +181,11 @@ def issue_ticket(chat_id, user_id, cod, name):
             increment_daily_tickets(user_id)
         save_data()
         
-        # ТВОЙ ФОРМАТ БИЛЕТА
         ticket = f"{cod}\n{now.strftime('%I:%M %p').lstrip('0')}\n\nCererea dumneavoastră procesare.\n\nBiletul electronic nr. {nr}\n{now.strftime('%d.%m.%Y')}\nValabil {VALABILITATE_ORE} ora (de la {now.strftime('%H:%M')} Pret {PRET} MDL)\n\nNumarul de bord: {cod}"
         
         bot.send_message(chat_id, ticket, reply_markup=user_menu(user_id))
     except Exception as e:
         bot.send_message(chat_id, f"Ошибка: {e}")
-
-# ========== HTML ==========
-HTML = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Transport Moldova Admin</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            color: white;
-            padding: 20px;
-            min-height: 100vh;
-        }
-        .container { max-width: 1200px; margin: 0 auto; }
-        h1 { margin-bottom: 20px; font-size: 2em; }
-        h1 i { color: #00d4ff; }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .card {
-            background: rgba(255,255,255,0.1);
-            border-radius: 15px;
-            padding: 20px;
-            text-align: center;
-            backdrop-filter: blur(10px);
-        }
-        .card .num { font-size: 2.5em; font-weight: bold; color: #00d4ff; }
-        .card .label { margin-top: 10px; color: #aaa; }
-        table {
-            width: 100%;
-            background: rgba(255,255,255,0.05);
-            border-radius: 15px;
-            border-collapse: collapse;
-            overflow: hidden;
-        }
-        th, td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-        }
-        th { background: rgba(0,212,255,0.2); color: #00d4ff; }
-        tr:hover { background: rgba(255,255,255,0.05); }
-        .tabs {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-        .tab {
-            background: rgba(255,255,255,0.1);
-            padding: 10px 25px;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: 0.3s;
-        }
-        .tab.active { background: #00d4ff; color: #1a1a2e; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-        button {
-            background: #00d4ff;
-            color: #1a1a2e;
-            border: none;
-            padding: 8px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            margin: 10px 0;
-            font-weight: bold;
-        }
-        .btn-red { background: #ff4757; color: white; }
-        .vip-badge { background: gold; color: #1a1a2e; padding: 2px 8px; border-radius: 20px; font-size: 12px; }
-        code { background: #000; padding: 2px 6px; border-radius: 5px; font-family: monospace; }
-        .footer { margin-top: 30px; text-align: center; color: #555; font-size: 12px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1><i>🚌</i> TRANSPORT MOLDOVA — АДМИН ПАНЕЛЬ</h1>
-        <div style="margin-bottom: 20px; color: #aaa;">{{ now }}</div>
-        
-        <div class="stats">
-            <div class="card"><div class="num">{{ users_count }}</div><div class="label">Пользователей</div></div>
-            <div class="card"><div class="num">{{ tickets_count }}</div><div class="label">Билетов продано</div></div>
-            <div class="card"><div class="num">{{ revenue }}</div><div class="label">Выручка (MDL)</div></div>
-            <div class="card"><div class="num">{{ vip_count }}</div><div class="label">VIP пользователей</div></div>
-        </div>
-        
-        <div class="tabs">
-            <div class="tab active" onclick="openTab('users')">👥 Пользователи</div>
-            <div class="tab" onclick="openTab('tickets')">🎫 Билеты</div>
-            <div class="tab" onclick="openTab('passwords')">🔑 Пароли</div>
-        </div>
-        
-        <div id="users" class="tab-content active">
-            <h3>Список пользователей</h3>
-            <table>
-                <tr><th>ID</th><th>Имя</th><th>Билетов</th><th>VIP</th><th>Регистрация</th><th>Статус</th></tr>
-                {% for u in users %}
-                <tr>
-                    <td>{{ u.id }}</td>
-                    <td>{{ u.name }} {% if u.vip %}<span class="vip-badge">💎 VIP</span>{% endif %}</td>
-                    <td>{{ u.tickets }}</td>
-                    <td>{% if u.vip_expiry %}до {{ u.vip_expiry }}{% else %}—{% endif %}</td>
-                    <td>{{ u.reg_date }}</td>
-                    <td>{% if u.access %}✅ Активен{% else %}❌ Блок{% endif %}</td>
-                </tr>
-                {% endfor %}
-            </table>
-        </div>
-        
-        <div id="tickets" class="tab-content">
-            <h3>Последние билеты</h3>
-            <table>
-                <tr><th>№ билета</th><th>Автобус</th><th>Пользователь</th><th>Дата</th><th>Время</th></tr>
-                {% for t in tickets %}
-                <tr>
-                    <td><code>{{ t.num }}</code></td>
-                    <td>{{ t.bus }}</td>
-                    <td>{{ t.user }}</td>
-                    <td>{{ t.date }}</td>
-                    <td>{{ t.time }}</td>
-                </tr>
-                {% endfor %}
-            </table>
-        </div>
-        
-        <div id="passwords" class="tab-content">
-            <h3>Активные пароли</h3>
-            <button onclick="location.reload()">🔄 Обновить</button>
-            <button onclick="genPass()">🆕 Создать пароль</button>
-            <button class="btn-red" onclick="clearPass()">🗑 Удалить все</button>
-            <table>
-                <tr><th>Пароль</th><th>Действие</th></tr>
-                {% for p in passwords %}
-                <tr>
-                    <td><code>{{ p }}</code></td>
-                    <td><button class="btn-red" onclick="delPass('{{ p }}')">❌ Удалить</button></td>
-                </tr>
-                {% endfor %}
-            </table>
-        </div>
-        
-        <div class="footer">
-            🎫 Обычные: 3 билета/день, кулдаун 45 мин | 💎 VIP: 10 билетов/день, без кулдауна
-        </div>
-    </div>
-    
-    <script>
-        function openTab(name) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            event.target.classList.add('active');
-            document.getElementById(name).classList.add('active');
-        }
-        function genPass() { fetch('/gen_pass').then(() => location.reload()); }
-        function delPass(p) { fetch('/del_pass/' + p).then(() => location.reload()); }
-        function clearPass() { if(confirm('Удалить все пароли?')) fetch('/clear_pass').then(() => location.reload()); }
-    </script>
-</body>
-</html>
-'''
-
-@app.route('/')
-def index():
-    users = []
-    for uid, access in user_access.items():
-        if access:
-            stats = user_stats.get(uid, {})
-            reg_date = user_register_date.get(uid)
-            vip_expiry = get_vip_expiry(int(uid))
-            users.append({
-                'id': uid,
-                'name': stats.get('name', 'Unknown'),
-                'tickets': stats.get('tickets', 0),
-                'vip': vip_expiry is not None,
-                'vip_expiry': vip_expiry.strftime('%d.%m') if vip_expiry else None,
-                'reg_date': datetime.fromisoformat(reg_date).strftime('%d.%m.%Y') if reg_date else '?',
-                'access': access
-            })
-    
-    tickets = []
-    for nr, b in list(bilete_active.items())[-30:]:
-        tickets.append({
-            'num': nr,
-            'bus': b.get('bus'),
-            'user': b.get('user_name', 'Unknown'),
-            'date': b.get('date', ''),
-            'time': b.get('time', '')
-        })
-    
-    return render_template_string(HTML,
-        now=get_time().strftime('%d.%m.%Y %H:%M:%S'),
-        users_count=len([u for u in user_access if user_access[u]]),
-        tickets_count=len(bilete_active),
-        revenue=len(bilete_active) * PRET,
-        vip_count=len([u for u in user_vip if datetime.fromisoformat(user_vip[u]) > get_time()]),
-        users=users,
-        tickets=tickets,
-        passwords=parole_active
-    )
-
-@app.route('/gen_pass')
-def gen_pass():
-    p = gen_parola()
-    parole_active.append(p)
-    save_data()
-    return 'ok'
-
-@app.route('/del_pass/<p>')
-def del_pass(p):
-    if p in parole_active:
-        parole_active.remove(p)
-        save_data()
-    return 'ok'
-
-@app.route('/clear_pass')
-def clear_pass():
-    parole_active.clear()
-    save_data()
-    return 'ok'
-
-def start_web():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 # ========== МЕНЮ ==========
 def admin_menu():
@@ -558,10 +324,7 @@ def buy_vip_cmd(m):
         bot.send_message(uid, f"💎 У тебя уже есть VIP до {expiry.strftime('%d.%m.%Y')}")
         return
     
-    username = m.from_user.username or m.from_user.first_name
-    user_link = f"@{username}" if username else f"{m.from_user.first_name}"
-    
-    bot.send_message(ADMIN_ID, f"🟢 Заявка на VIP от {user_link} (ID: `{uid}`)\nВыдать: `/give_vip {uid} {VIP_DAYS}`", parse_mode='Markdown')
+    bot.send_message(ADMIN_ID, f"🟢 Заявка на VIP от @{m.from_user.username or m.from_user.first_name} (ID: `{uid}`)\nВыдать: `/give_vip {uid} {VIP_DAYS}`", parse_mode='Markdown')
     bot.send_message(uid, f"💎 **VIP статус**\n\n💰 Цена: {VIP_PRICE} лей\n📅 Длительность: {VIP_DAYS} дней\n🎫 10 билетов/день, без кулдауна\n\n📩 Свяжись с @RaskovskI для оплаты", parse_mode='Markdown')
 
 # ========== АДМИН КОМАНДЫ ==========
@@ -593,7 +356,8 @@ def remove_vip_cmd(m):
     try:
         parts = m.text.split()
         user_id = int(parts[1])
-        remove_vip(user_id)
+        user_vip.pop(str(user_id), None)
+        save_data()
         bot.send_message(ADMIN_ID, f"✅ VIP снят с {user_id}")
     except:
         bot.send_message(ADMIN_ID, "❌ /remove_vip ID")
@@ -681,7 +445,7 @@ def clear_pass_cmd(m):
     save_data()
     bot.send_message(ADMIN_ID, "✅ Все пароли удалены")
 
-# ========== ОБРАБОТЧИК КНОПОК И СООБЩЕНИЙ ==========
+# ========== ОБРАБОТЧИК КНОПОК ==========
 @bot.message_handler(func=lambda m: m.text == "❓ Команды")
 def commands_btn(m):
     help_cmd(m)
@@ -727,7 +491,7 @@ def process_ticket_number(m):
     
     threading.Thread(target=issue_ticket, args=(uid, uid, cod, name)).start()
 
-# Обработка прямого ввода номера автобуса
+# Обработка прямого ввода номера
 @bot.message_handler(func=lambda m: m.text and m.text.isdigit() and len(m.text) == 4 and 2000 <= int(m.text) <= 2099)
 def direct_ticket(m):
     uid = m.from_user.id
@@ -752,17 +516,13 @@ def direct_ticket(m):
 if __name__ == "__main__":
     load_data()
     
-    # Запускаем проверку VIP каждые 6 часов
     def vip_checker():
         while True:
             time.sleep(21600)
             check_expired_vip()
     threading.Thread(target=vip_checker, daemon=True).start()
     
-    # Запускаем веб-сервер
-    threading.Thread(target=start_web, daemon=True).start()
-    
-    # Удаляем вебхук на всякий случай
+    # Удаляем вебхук
     try:
         bot.remove_webhook()
     except:
@@ -770,4 +530,7 @@ if __name__ == "__main__":
     
     print("=" * 50)
     print("✅ БОТ ЗАПУЩЕН")
-   
+    print(f"👑 Admin ID: {ADMIN_ID}")
+    print("=" * 50)
+    
+    bot.infinity_polling(timeout=10)

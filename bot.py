@@ -15,7 +15,7 @@ app = Flask(__name__)
 
 # ========== ЦЕНЫ И ЛИМИТЫ ==========
 PRET = 6
-VIP_WEEK_PRICE = 5
+VIP_WEEK_PRICE = 15
 VIP_WEEK_DAYS = 7
 VIP_MONTH_PRICE = 60
 VIP_MONTH_DAYS = 30
@@ -211,7 +211,7 @@ def start_cmd(m):
         else:
             msg += f"⭐ Обычный: {NORMAL_DAILY_LIMIT} билетов/день, кулдаун {NORMAL_COOLDOWN_HOURS} ч\n"
             msg += f"🎫 Сегодня: {get_daily_tickets_count(uid)}/{NORMAL_DAILY_LIMIT}\n\n"
-            msg += "🔥 Купи VIP со скидкой 40%!\n/help для инфо"
+            msg += "🔥 Купи VIP:\n• Неделя: 15 лей\n• Месяц: 60 лей (скидка 40%!)\n/buy_vip"
         bot.send_message(uid, msg, reply_markup=user_menu(uid))
     else:
         bot.send_message(uid, "🔑 Введи код доступа")
@@ -227,7 +227,7 @@ def check_code(m):
         if str(uid) not in user_stats:
             user_stats[str(uid)] = {'tickets': 0}
         save_data()
-        bot.send_message(uid, f"✅ Доступ открыт!\n\n⭐ Обычный: {NORMAL_DAILY_LIMIT} билетов/день, кулдаун {NORMAL_COOLDOWN_HOURS} ч\n\n🔥 Купи VIP со скидкой 40%: /buy_vip", reply_markup=user_menu(uid))
+        bot.send_message(uid, f"✅ Доступ открыт!\n\n⭐ Обычный: {NORMAL_DAILY_LIMIT} билетов/день, кулдаун {NORMAL_COOLDOWN_HOURS} ч\n\n🔥 Купи VIP:\n• Неделя: 15 лей\n• Месяц: 60 лей\n/buy_vip", reply_markup=user_menu(uid))
         bot.send_message(ADMIN_ID, f"🔓 Новый пользователь: {name} (ID: {uid})")
     else:
         bot.send_message(uid, "❌ Неверный код!\nПопробуй ещё:")
@@ -248,7 +248,7 @@ def help_cmd(m):
 /vip_list - список VIP
 
 💎 ВЫДАТЬ VIP:
-/give_vip ID week - неделя (5 лей)
+/give_vip ID week - неделя (15 лей)
 /give_vip ID month - месяц (60 лей)
 /give_vip @username week - по юзернейму
 
@@ -273,7 +273,7 @@ def help_cmd(m):
 Сегодня: {daily}/{limit}
 
 💎 VIP ПАКЕТЫ:
-• НЕДЕЛЯ: 5 лей
+• НЕДЕЛЯ: 15 лей
 • МЕСЯЦ: 60 лей (скидка 40%!)
 10 билетов/день, без кулдауна
 """
@@ -321,7 +321,7 @@ def status_cmd(m):
 💰 Цена билета: {PRET} лей
 
 💎 КУПИ VIP:
-• Неделя: 5 лей
+• Неделя: 15 лей
 • Месяц: 60 лей (скидка 40%!)
 Напиши /buy_vip
 """
@@ -644,7 +644,8 @@ def back_btn(m):
                 msg += f"🎫 Сегодня: {get_daily_tickets_count(uid)}/10 билетов"
             else:
                 msg += f"⭐ Обычный: {NORMAL_DAILY_LIMIT} билетов/день\n"
-                msg += f"🎫 Сегодня: {get_daily_tickets_count(uid)}/{NORMAL_DAILY_LIMIT}"
+                msg += f"🎫 Сегодня: {get_daily_tickets_count(uid)}/{NORMAL_DAILY_LIMIT}\n\n"
+                msg += "Купи VIP: /buy_vip"
             bot.send_message(uid, msg, reply_markup=user_menu(uid))
         else:
             bot.send_message(uid, "🔑 Введи код доступа")
@@ -707,6 +708,6 @@ if __name__ == "__main__":
     print("✅ БОТ ЗАПУЩЕН")
     print(f"👑 ADMIN ID: {ADMIN_ID}")
     print(f"💎 VIP неделя: {VIP_WEEK_PRICE} лей / {VIP_WEEK_DAYS} дней")
-    print(f"🔥 VIP месяц: {VIP_MONTH_PRICE} лей / {VIP_MONTH_DAYS} дней (скидка 40%)")
+    print(f"🔥 VIP месяц: {VIP_MONTH_PRICE} лей / {VIP_MONTH_DAYS} дней (скидка 40% от 100)")
     print("=" * 50)
     bot.infinity_polling(timeout=10)

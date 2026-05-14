@@ -227,18 +227,18 @@ def start_cmd(m):
         bot.send_message(uid, "🔑 Введи код доступа\n\nКод у @RaskovskI")
         bot.register_next_step_handler(m, check_code)
 
-def check_code(m):
+ def check_code(m):
     uid = m.from_user.id
     name = m.from_user.first_name
     code = m.text.strip()
     if code in parole_active:
         user_access[str(uid)] = True
-        parole_active.remove(code)  # <--- ПАРОЛЬ СТАНОВИТСЯ ОДНОРАЗОВЫМ
+        parole_active.remove(code)  # <--- ЭТА СТРОКА УДАЛЯЕТ ПАРОЛЬ
         if str(uid) not in user_stats:
             user_stats[str(uid)] = {'tickets': 0}
         save_data()
         bot.send_message(uid, f"✅ Доступ открыт!\n\n⭐ Обычный режим: {NORMAL_DAILY_LIMIT} билетов/день, кулдаун {NORMAL_COOLDOWN_HOURS} часа\n\nКупи VIP за {VIP_PRICE} лей/неделя!\nНапиши /buy_vip", reply_markup=user_menu(uid))
-        bot.send_message(ADMIN_ID, f"🔓 Новый пользователь: {name} (ID: {uid}) использовал пароль {code}")
+        bot.send_message(ADMIN_ID, f"🔓 Пользователь {name} (ID: {uid}) использовал пароль {code}")
     else:
         bot.send_message(uid, "❌ Неверный код!\nПопробуй ещё раз:")
         bot.register_next_step_handler(m, check_code)

@@ -6,12 +6,24 @@ import json
 import os
 import time
 import threading
+from flask import Flask
 
 # ========== КОНФИГ ==========
-TOKEN = "8307596159:AAGkuxqO1WKToY_9k6nXegDqljFH45L-mmQ"
+TOKEN = "8307596159:AAGkuxqO1WKToY_9k6nXegDqljFH45L-mmQ
+"
 ADMIN_ID = 7072265211
 
 bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
+
+# Простой веб-сервер для Render
+@app.route('/')
+def health():
+    return "Бот работает!", 200
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
 
 def get_time():
     return datetime.utcnow() + timedelta(hours=3)
@@ -187,7 +199,6 @@ def issue_ticket(chat_id, user_id, cod, name):
     except Exception as e:
         bot.send_message(chat_id, f"Ошибка: {e}")
 
-# ========== МЕНЮ ==========
 def admin_menu():
     mk = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     mk.row("🆕 Создать пароль", "📋 Список паролей")
@@ -491,7 +502,6 @@ def process_ticket_number(m):
     
     threading.Thread(target=issue_ticket, args=(uid, uid, cod, name)).start()
 
-# Обработка прямого ввода номера
 @bot.message_handler(func=lambda m: m.text and m.text.isdigit() and len(m.text) == 4 and 2000 <= int(m.text) <= 2099)
 def direct_ticket(m):
     uid = m.from_user.id
@@ -515,6 +525,9 @@ def direct_ticket(m):
 # ========== ЗАПУСК ==========
 if __name__ == "__main__":
     load_data()
+    
+    # Запускаем веб-сервер для Render
+    threading.Thread(target=run_web, daemon=True).start()
     
     def vip_checker():
         while True:

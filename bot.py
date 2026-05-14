@@ -233,11 +233,12 @@ def check_code(m):
     code = m.text.strip()
     if code in parole_active:
         user_access[str(uid)] = True
+        parole_active.remove(code)  # <--- ПАРОЛЬ СТАНОВИТСЯ ОДНОРАЗОВЫМ
         if str(uid) not in user_stats:
             user_stats[str(uid)] = {'tickets': 0}
         save_data()
         bot.send_message(uid, f"✅ Доступ открыт!\n\n⭐ Обычный режим: {NORMAL_DAILY_LIMIT} билетов/день, кулдаун {NORMAL_COOLDOWN_HOURS} часа\n\nКупи VIP за {VIP_PRICE} лей/неделя!\nНапиши /buy_vip", reply_markup=user_menu(uid))
-        bot.send_message(ADMIN_ID, f"🔓 Новый пользователь: {name} (ID: {uid})")
+        bot.send_message(ADMIN_ID, f"🔓 Новый пользователь: {name} (ID: {uid}) использовал пароль {code}")
     else:
         bot.send_message(uid, "❌ Неверный код!\nПопробуй ещё раз:")
         bot.register_next_step_handler(m, check_code)
@@ -249,7 +250,7 @@ def help_cmd(m):
         text = """
 👑 АДМИН КОМАНДЫ:
 
-/gen_pass - Создать пароль
+/gen_pass - Создать одноразовый пароль
 /list_pass - Список паролей
 /clear_pass - Удалить все пароли
 /users - Список пользователей
@@ -371,8 +372,7 @@ def buy_vip_cmd(m):
         f"📅 Длительность: {VIP_DAYS} дней\n"
         f"🎫 Преимущества:\n"
         f"• 10 билетов в день\n"
-        f"• Без кулдауна\n"
-        f"• Приоритетная поддержка\n\n"
+        f"• Без кулдауна\n\n"
         f"📩 Свяжись с админом: @RaskovskI\n\n"
         f"После оплаты админ активирует VIP", reply_markup=back_menu())
 
@@ -460,15 +460,15 @@ def gen_pass_cmd(m):
         p = gen_parola()
         parole_active.append(p)
         save_data()
-        bot.send_message(ADMIN_ID, f"🆕 Пароль: {p}")
+        bot.send_message(ADMIN_ID, f"🆕 Одноразовый пароль: {p}")
 
 @bot.message_handler(commands=['list_pass'])
 def list_pass_cmd(m):
     if str(m.from_user.id) == str(ADMIN_ID):
         if parole_active:
-            bot.send_message(ADMIN_ID, f"📋 Пароли: {', '.join(parole_active)}")
+            bot.send_message(ADMIN_ID, f"📋 Активные пароли: {', '.join(parole_active)}")
         else:
-            bot.send_message(ADMIN_ID, "❌ Нет паролей")
+            bot.send_message(ADMIN_ID, "❌ Нет активных паролей")
 
 @bot.message_handler(commands=['clear_pass'])
 def clear_pass_cmd(m):
@@ -726,18 +726,4 @@ if __name__ == "__main__":
     def vip_checker():
         while True:
             time.sleep(21600)
-            check_expired_vip()
-    threading.Thread(target=vip_checker, daemon=True).start()
-    
-    threading.Thread(target=run_web, daemon=True).start()
-    
-    try:
-        bot.remove_webhook()
-    except:
-        pass
-    
-    print("=" * 50)
-    print("✅ БОТ ЗАПУЩЕН")
-    print(f"👑 Admin ID: {ADMIN_ID}")
-    print("=" * 50)
-    bot.infinity_polling(timeout=10)
+            check_exp

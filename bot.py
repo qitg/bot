@@ -9,7 +9,8 @@ import threading
 from flask import Flask, render_template_string, request
 
 # ========== КОНФИГ ==========
-TOKEN = "8307596159:AAES-a6TjEaAaP_j6LPogq2Eb9vsoBqtL4o"
+TOKEN = "8307596159:AAGkuxqO1WKToY_9k6nXegDqljFH45L-mmQ
+"
 ADMIN_ID = 7072265211
 
 bot = telebot.TeleBot(TOKEN)

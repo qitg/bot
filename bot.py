@@ -19,6 +19,7 @@ def get_time():
     return datetime.utcnow() + timedelta(hours=3)
 
 PRET = 6
+VALABILITATE_ORE = 1
 VIP_PRICE = 25
 VIP_DAYS = 7
 NORMAL_DAILY_LIMIT = 3
@@ -160,17 +161,20 @@ def register_new_user(user_id, name):
         save_data()
         bot.send_message(ADMIN_ID, f"🆕 Новый пользователь: {name} (ID: `{uid}`)", parse_mode='Markdown')
 
+# ========== ВЫДАЧА БИЛЕТА (ТАК КАК ТЫ ХОЧЕШЬ) ==========
 def issue_ticket(chat_id, user_id, cod, name):
     try:
-        msg = bot.send_message(chat_id, "🔄 Обработка...")
+        msg = bot.send_message(chat_id, "🔄 Cererea dumneavoastră este în curs de procesare...")
         time.sleep(2)
         bot.delete_message(chat_id, msg.message_id)
         now = get_time()
+        exp = now + timedelta(hours=VALABILITATE_ORE)
         nr = random.randint(10000000, 99999999)
         bilete_active[str(nr)] = {
             'bus': cod,
             'user_id': user_id,
             'user_name': name,
+            'exp': exp.isoformat(),
             'date': now.strftime("%d.%m.%Y"),
             'time': now.strftime("%H:%M")
         }
@@ -179,10 +183,13 @@ def issue_ticket(chat_id, user_id, cod, name):
             update_stats(user_id, name)
             increment_daily_tickets(user_id)
         save_data()
-        ticket = f"✅ Билет #{nr}\n🚌 Автобус: {cod}\n📅 Дата: {now.strftime('%d.%m.%Y')}\n⏰ Время: {now.strftime('%H:%M')}\n💰 Цена: {PRET} лей"
-        bot.send_message(chat_id, ticket)
+        
+        # ТВОЙ ФОРМАТ БИЛЕТА
+        ticket = f"{cod}\n{now.strftime('%I:%M %p').lstrip('0')}\n\nCererea dumneavoastră procesare.\n\nBiletul electronic nr. {nr}\n{now.strftime('%d.%m.%Y')}\nValabil {VALABILITATE_ORE} ora (de la {now.strftime('%H:%M')} Pret {PRET} MDL)\n\nNumarul de bord: {cod}"
+        
+        bot.send_message(chat_id, ticket, reply_markup=user_menu(user_id))
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка: {e}")
+        bot.send_message(chat_id, f"Ошибка: {e}")
 
 # ========== HTML ==========
 HTML = '''
@@ -475,45 +482,58 @@ def check_code(m):
         bot.send_message(uid, f"✅ Доступ открыт!\n\nОбычный: {NORMAL_DAILY_LIMIT} билетов/день, кулдаун {NORMAL_COOLDOWN_MINUTES} мин\nКупи VIP за {VIP_PRICE} лей/неделя!", reply_markup=user_menu(uid))
         bot.send_message(ADMIN_ID, f"🔓 Новый пользователь: {name} (ID: `{uid}`)", parse_mode='Markdown')
     else:
-        bot.send_message(uid, "❌ Неверный код!")
+        bot.send_message(uid, "❌ Неверный код!\nПопробуй ещё раз:")
         bot.register_next_step_handler(m, check_code)
 
 @bot.message_handler(commands=['help'])
 def help_cmd(m):
     uid = m.from_user.id
     if str(uid) == str(ADMIN_ID):
-        text = """🤖 **Команды админа:**
-/start - Меню
-/help - Помощь
-/give_vip ID дни - Выдать VIP
-/remove_vip ID - Снять VIP
+        text = """
+🤖 **Команды админа:**
+
+/start - Главное меню
+/help - Этот список
+
+👑 **Управление:**
+/give_vip <ID> <дни> - Выдать VIP
+/remove_vip <ID> - Снять VIP
 /vip_list - Список VIP
 /users - Список пользователей
 /stats - Статистика
-/ad текст - Рассылка
+/ad <текст> - Рассылка
+
+🔑 **Пароли:**
 /gen_pass - Создать пароль
 /list_pass - Список паролей
-/clear_pass - Удалить пароли"""
+/clear_pass - Удалить все
+"""
     else:
         daily = get_daily_tickets_count(uid)
         limit = NORMAL_DAILY_LIMIT if not is_vip(uid) else 10
-        text = f"""🤖 **Команды:**
-/start - Меню
-/help - Помощь
+        text = f"""
+🤖 **Доступные команды:**
+
+/start - Главное меню
+/help - Этот список
 /status - Мой статус
 /buy_vip - Купить VIP
 
-🎫 Билет: напиши номер автобуса (2000-2099)
+🎫 **Как купить билет:**
+Просто напиши номер автобуса (2000-2099)
 
-📊 Сегодня: {daily}/{limit}
-💎 VIP: 10 билетов/день, без кулдауна - 25 лей"""
+📊 **Твой статус:**
+Сегодня использовано: {daily}/{limit}
+
+💎 VIP: 10 билетов/день, без кулдауна - 25 лей/неделя
+"""
     bot.send_message(uid, text, parse_mode='Markdown')
 
 @bot.message_handler(commands=['status'])
 def status_cmd(m):
     uid = m.from_user.id
     if not user_access.get(str(uid), False):
-        bot.send_message(uid, "❌ Введи код доступа через /start")
+        bot.send_message(uid, "❌ Сначала введи код доступа через /start")
         return
     
     daily = get_daily_tickets_count(uid)
@@ -538,8 +558,11 @@ def buy_vip_cmd(m):
         bot.send_message(uid, f"💎 У тебя уже есть VIP до {expiry.strftime('%d.%m.%Y')}")
         return
     
-    bot.send_message(ADMIN_ID, f"🟢 Заявка на VIP от @{m.from_user.username or m.from_user.first_name} (ID: `{uid}`)\nВыдать: `/give_vip {uid} {VIP_DAYS}`", parse_mode='Markdown')
-    bot.send_message(uid, f"💎 **VIP за {VIP_PRICE} лей**\n📅 {VIP_DAYS} дней\n🎫 10 билетов/день, без кулдауна\n\n📩 Свяжись с @RaskovskI для оплаты", parse_mode='Markdown')
+    username = m.from_user.username or m.from_user.first_name
+    user_link = f"@{username}" if username else f"{m.from_user.first_name}"
+    
+    bot.send_message(ADMIN_ID, f"🟢 Заявка на VIP от {user_link} (ID: `{uid}`)\nВыдать: `/give_vip {uid} {VIP_DAYS}`", parse_mode='Markdown')
+    bot.send_message(uid, f"💎 **VIP статус**\n\n💰 Цена: {VIP_PRICE} лей\n📅 Длительность: {VIP_DAYS} дней\n🎫 10 билетов/день, без кулдауна\n\n📩 Свяжись с @RaskovskI для оплаты", parse_mode='Markdown')
 
 # ========== АДМИН КОМАНДЫ ==========
 
@@ -555,7 +578,7 @@ def give_vip_cmd(m):
         user_id = int(parts[1])
         days = int(parts[2]) if len(parts) > 2 else VIP_DAYS
         set_vip(user_id, days)
-        bot.send_message(ADMIN_ID, f"✅ VIP выдан {user_id} на {days} дней")
+        bot.send_message(ADMIN_ID, f"✅ VIP выдан пользователю {user_id} на {days} дней")
         try:
             bot.send_message(user_id, f"💎 VIP активирован на {days} дней!\nДо: {(get_time() + timedelta(days=days)).strftime('%d.%m.%Y')}")
         except:
@@ -579,7 +602,7 @@ def remove_vip_cmd(m):
 def vip_list_cmd(m):
     if str(m.from_user.id) != str(ADMIN_ID):
         return
-    text = "💎 VIP:\n"
+    text = "💎 VIP пользователи:\n"
     count = 0
     for uid, expiry_str in user_vip.items():
         expiry = datetime.fromisoformat(expiry_str)
@@ -602,7 +625,7 @@ def users_list_cmd(m):
             tickets = stats.get('tickets', 0)
             vip = "💎" if is_vip(int(uid)) else "⭐"
             text += f"{vip} {name} - {tickets} билетов (ID:{uid})\n"
-    bot.send_message(ADMIN_ID, text if text != "👥 Пользователи:\n" else "❌ Нет пользователей")
+    bot.send_message(ADMIN_ID, text if len(text) > 15 else "❌ Нет пользователей")
 
 @bot.message_handler(commands=['stats'])
 def stats_cmd(m):
@@ -617,7 +640,7 @@ def stats_cmd(m):
 def ad_cmd(m):
     if str(m.from_user.id) != str(ADMIN_ID):
         return
-    msg = bot.send_message(ADMIN_ID, "✏️ Текст рассылки:")
+    msg = bot.send_message(ADMIN_ID, "✏️ Введи текст рассылки:")
     bot.register_next_step_handler(msg, do_broadcast)
 
 def do_broadcast(m):
@@ -645,7 +668,10 @@ def gen_pass_cmd(m):
 def list_pass_cmd(m):
     if str(m.from_user.id) != str(ADMIN_ID):
         return
-    bot.send_message(ADMIN_ID, f"📋 Пароли: {', '.join(parole_active) if parole_active else 'Нет'}")
+    if parole_active:
+        bot.send_message(ADMIN_ID, f"📋 Пароли: {', '.join(parole_active)}")
+    else:
+        bot.send_message(ADMIN_ID, "❌ Нет паролей")
 
 @bot.message_handler(commands=['clear_pass'])
 def clear_pass_cmd(m):
@@ -653,28 +679,28 @@ def clear_pass_cmd(m):
         return
     parole_active.clear()
     save_data()
-    bot.send_message(ADMIN_ID, "✅ Пароли удалены")
+    bot.send_message(ADMIN_ID, "✅ Все пароли удалены")
 
-# ========== ОБРАБОТЧИК СООБЩЕНИЙ ==========
+# ========== ОБРАБОТЧИК КНОПОК И СООБЩЕНИЙ ==========
 @bot.message_handler(func=lambda m: m.text == "❓ Команды")
-def cmds_btn(m):
+def commands_btn(m):
     help_cmd(m)
 
 @bot.message_handler(func=lambda m: m.text == "⭐ Купить VIP")
-def buy_btn(m):
+def buy_vip_btn(m):
     buy_vip_cmd(m)
 
 @bot.message_handler(func=lambda m: m.text == "💎 Мой VIP" or m.text == "⏰ Мой статус")
 def status_btn(m):
     status_cmd(m)
 
-@bot.message_handler(func=lambda m: m.text and m.text.startswith("🎫"))
+@bot.message_handler(func=lambda m: m.text == "🎫 Купить билет")
 def buy_ticket_btn(m):
     uid = m.from_user.id
     if not user_access.get(str(uid), False):
-        bot.send_message(uid, "❌ Сначала /start")
+        bot.send_message(uid, "❌ Сначала введи код доступа через /start")
         return
-    bot.send_message(uid, "🚌 Введи номер (2000-2099):")
+    bot.send_message(uid, "🚌 Введи номер автобуса (2000-2099):", reply_markup=telebot.types.ReplyKeyboardRemove())
     bot.register_next_step_handler(m, process_ticket_number)
 
 def process_ticket_number(m):
@@ -683,12 +709,12 @@ def process_ticket_number(m):
     text = m.text.strip()
     
     if not re.match(r'^\d{4}$', text):
-        bot.send_message(uid, "❌ 4 цифры (2000-2099)", reply_markup=user_menu(uid))
+        bot.send_message(uid, "❌ Нужно 4 цифры (2000-2099)!", reply_markup=user_menu(uid))
         return
     
     cod = int(text)
     if cod < 2000 or cod > 2099:
-        bot.send_message(uid, f"❌ {cod} - не номер автобуса", reply_markup=user_menu(uid))
+        bot.send_message(uid, f"❌ {cod} не в диапазоне 2000-2099", reply_markup=user_menu(uid))
         return
     
     can, mins = check_can_buy_ticket(uid)
@@ -701,9 +727,26 @@ def process_ticket_number(m):
     
     threading.Thread(target=issue_ticket, args=(uid, uid, cod, name)).start()
 
-@bot.message_handler(func=lambda m: m.text and m.text.isdigit() and 2000 <= int(m.text) <= 2099)
-def process_ticket_direct(m):
-    process_ticket_number(m)
+# Обработка прямого ввода номера автобуса
+@bot.message_handler(func=lambda m: m.text and m.text.isdigit() and len(m.text) == 4 and 2000 <= int(m.text) <= 2099)
+def direct_ticket(m):
+    uid = m.from_user.id
+    if not user_access.get(str(uid), False):
+        bot.send_message(uid, "❌ Сначала введи код доступа через /start")
+        return
+    
+    cod = int(m.text)
+    name = m.from_user.first_name
+    
+    can, mins = check_can_buy_ticket(uid)
+    if not can:
+        if mins > 0:
+            bot.send_message(uid, f"⏰ Жди {mins} мин!", reply_markup=user_menu(uid))
+        else:
+            bot.send_message(uid, f"❌ Лимит {NORMAL_DAILY_LIMIT} билетов в день!", reply_markup=user_menu(uid))
+        return
+    
+    threading.Thread(target=issue_ticket, args=(uid, uid, cod, name)).start()
 
 # ========== ЗАПУСК ==========
 if __name__ == "__main__":
@@ -719,10 +762,12 @@ if __name__ == "__main__":
     # Запускаем веб-сервер
     threading.Thread(target=start_web, daemon=True).start()
     
+    # Удаляем вебхук на всякий случай
+    try:
+        bot.remove_webhook()
+    except:
+        pass
+    
     print("=" * 50)
     print("✅ БОТ ЗАПУЩЕН")
-    print(f"👑 Admin ID: {ADMIN_ID}")
-    print("=" * 50)
-    
-    # Запускаем бота
-    bot.infinity_polling(timeout=10)
+   

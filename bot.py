@@ -23,20 +23,23 @@ NORMAL_DAILY_LIMIT = 3
 NORMAL_COOLDOWN_HOURS = 3
 
 # ========== ДАННЫЕ ==========
-user_access = {}
-user_cooldown = {}
-parole_active = []
-user_stats = {}
-user_vip = {}
-user_daily_tickets = {}
-user_names = {}
+user_access = {}           # есть ли доступ у пользователя
+user_cooldown = {}         # время последнего билета
+parole_active = []         # активные коды доступа
+user_stats = {}            # статистика покупок
+user_vip = {}              # VIP статусы
+user_daily_tickets = {}    # счётчики билетов по дням
+user_names = {}            # имена и юзернеймы
+user_referrals = {}        # {user_id: [список приглашённых]}
+user_referred_by = {}      # {user_id: кто пригласил}
+promocodes = {}            # {код: {uses_left: int, created_by: int}}
 DATA_FILE = "bot_data.json"
 
 def get_time():
     return datetime.now()
 
 def load_data():
-    global user_access, user_cooldown, parole_active, user_stats, user_vip, user_daily_tickets, user_names
+    global user_access, user_cooldown, parole_active, user_stats, user_vip, user_daily_tickets, user_names, user_referrals, user_referred_by, promocodes
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'r') as f:
             data = json.load(f)
@@ -47,6 +50,9 @@ def load_data():
             user_vip = data.get('vip', {})
             user_daily_tickets = data.get('daily_tickets', {})
             user_names = data.get('names', {})
+            user_referrals = data.get('referrals', {})
+            user_referred_by = data.get('referred_by', {})
+            promocodes = data.get('promocodes', {})
 
 def save_data():
     with open(DATA_FILE, 'w') as f:
@@ -57,9 +63,63 @@ def save_data():
             'stats': user_stats,
             'vip': user_vip,
             'daily_tickets': user_daily_tickets,
-            'names': user_names
+            'names': user_names,
+            'referrals': user_referrals,
+            'referred_by': user_referred_by,
+            'promocodes': promocodes
         }, f)
 
+# ========== РЕФЕРАЛЫ ==========
+def add_referral(user_id, referrer_id):
+    uid = str(user_id)
+    rid = str(referrer_id)
+    if uid == rid:
+        return False
+    if uid in user_referred_by:
+        return False  # уже есть реферер
+    user_referred_by[uid] = rid
+    if rid not in user_referrals:
+        user_referrals[rid] = []
+    if uid not in user_referrals[rid]:
+        user_referrals[rid].append(uid)
+    save_data()
+    
+    # Проверка на получение VIP за 5 рефералов
+    if len(user_referrals[rid]) >= 5 and not is_vip(int(rid)):
+        set_vip(int(rid), 30)
+        try:
+            bot.send_message(int(rid), "🎉 ПОЗДРАВЛЯЮ! 🎉\n\nТы пригласил 5 друзей и получил VIP на месяц БЕСПЛАТНО!")
+        except:
+            pass
+    return True
+
+def get_referral_count(user_id):
+    uid = str(user_id)
+    return len(user_referrals.get(uid, []))
+
+def get_referral_link(user_id):
+    return f"https://t.me/{bot.get_me().username}?start=ref_{user_id}"
+
+# ========== ПРОМОКОДЫ ==========
+def create_promocode(code, uses):
+    promocodes[code] = {'uses_left': uses, 'created_by': ADMIN_ID}
+    save_data()
+    return True
+
+def use_promocode(user_id, code):
+    if code not in promocodes:
+        return False, "Промокод не найден"
+    if promocodes[code]['uses_left'] <= 0:
+        del promocodes[code]
+        save_data()
+        return False, "Промокод уже использован"
+    promocodes[code]['uses_left'] -= 1
+    if promocodes[code]['uses_left'] <= 0:
+        del promocodes[code]
+    save_data()
+    return True, f"Промокод активирован! Осталось использований: {promocodes.get(code, {}).get('uses_left', 0)}"
+
+# ========== ОСТАЛЬНЫЕ ФУНКЦИИ (VIP, БИЛЕТЫ И Т.Д.) ==========
 def gen_parola():
     return str(random.randint(100000, 999999))
 
@@ -129,13 +189,16 @@ def increment_daily_tickets(user_id):
     save_data()
 
 def check_can_buy_ticket(user_id):
+    # Админ может покупать всегда (но для теста оставим лимиты)
+    # if str(user_id) == str(ADMIN_ID):
+    #     return True, 0, ""
+    
     if is_vip(user_id):
         daily_count = get_daily_tickets_count(user_id)
         if daily_count >= 10:
             return False, 0, "VIP лимит 10 билетов в день"
         return True, 0, ""
-    if str(user_id) == str(ADMIN_ID):
-        return True, 0, ""
+    
     last = user_cooldown.get(str(user_id))
     if last:
         last_time = datetime.fromisoformat(last)
@@ -151,6 +214,8 @@ def check_can_buy_ticket(user_id):
     return True, 0, ""
 
 def set_cooldown(user_id):
+    if str(user_id) == str(ADMIN_ID):
+        return  # админ без кулдауна
     user_cooldown[str(user_id)] = get_time().isoformat()
     save_data()
 
@@ -161,7 +226,7 @@ def update_stats(user_id):
     user_stats[uid]['tickets'] += 1
     save_data()
 
-# ========== Flask Webhook ==========
+# ========== FLASK WEBHOOK ==========
 @app.route('/')
 def health():
     return "Bot is running!", 200
@@ -173,13 +238,14 @@ def webhook():
     bot.process_new_updates([update])
     return '!', 200
 
-# ========== Админ меню ==========
+# ========== МЕНЮ ==========
 def admin_menu():
     mk = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     mk.row("🆕 Создать пароль", "📋 Список паролей")
-    mk.row("💎 Выдать VIP", "📢 Рассылка")
-    mk.row("📊 Статистика", "👥 Пользователи")
-    mk.row("🗑 Сброс паролей", "❓ Команды")
+    mk.row("💎 Выдать VIP", "🎫 Создать промокод")
+    mk.row("📢 Рассылка", "📊 Статистика")
+    mk.row("👥 Пользователи", "🗑 Сброс паролей")
+    mk.row("❓ Команды")
     return mk
 
 def user_menu(uid):
@@ -187,12 +253,12 @@ def user_menu(uid):
     if is_vip(uid):
         daily_count = get_daily_tickets_count(uid)
         mk.row(f"🎫 Купить билет ({daily_count}/10)")
-        mk.row("💎 Мой VIP", "⏰ Мой статус")
+        mk.row("💎 Мой VIP", "👥 Рефералы")
     else:
         daily_count = get_daily_tickets_count(uid)
         mk.row(f"🎫 Купить билет ({daily_count}/{NORMAL_DAILY_LIMIT})")
-        mk.row("⭐ Купить VIP", "⏰ Мой статус")
-    mk.row("❓ Команды")
+        mk.row("⭐ Купить VIP", "👥 Рефералы")
+    mk.row("🎟 Промокод", "❓ Команды")
     return mk
 
 def back_menu():
@@ -200,17 +266,29 @@ def back_menu():
     mk.row("🔙 Назад")
     return mk
 
-# ========== Обработчики ==========
+# ========== ОБРАБОТЧИКИ ==========
 @bot.message_handler(commands=['start'])
 def start_cmd(m):
     uid = m.from_user.id
     name = m.from_user.first_name
     username = m.from_user.username
+    
+    # Сохраняем пользователя
     user_names[str(uid)] = {'name': name, 'username': username}
+    
+    # Проверка реферальной ссылки
+    text = m.text.split()
+    if len(text) > 1 and text[1].startswith('ref_'):
+        referrer_id = int(text[1].replace('ref_', ''))
+        if referrer_id != uid:
+            add_referral(uid, referrer_id)
+    
     save_data()
+    
     if str(uid) == str(ADMIN_ID):
         bot.send_message(uid, "🔐 Админ панель", reply_markup=admin_menu())
         return
+    
     if user_access.get(str(uid), False):
         msg = f"✅ Привет, {name}!\n\n"
         if is_vip(uid):
@@ -220,7 +298,7 @@ def start_cmd(m):
         else:
             msg += f"⭐ Обычный: {NORMAL_DAILY_LIMIT} билетов/день, кулдаун {NORMAL_COOLDOWN_HOURS} ч\n"
             msg += f"🎫 Сегодня: {get_daily_tickets_count(uid)}/{NORMAL_DAILY_LIMIT}\n\n"
-            msg += "🔥 Купи VIP:\n• Неделя: 15 лей\n• Месяц: 60 лей (скидка 40%!)\n/buy_vip"
+            msg += "🔥 Купи VIP:\n• Неделя: 15 лей\n• Месяц: 60 лей\n/buy_vip"
         bot.send_message(uid, msg, reply_markup=user_menu(uid))
     else:
         bot.send_message(uid, "🔑 Введи код доступа")
@@ -252,13 +330,14 @@ def help_cmd(m):
 /gen_pass - создать пароль
 /list_pass - список паролей
 /clear_pass - удалить все пароли
+/create_promo код количество - создать промокод
 /users - список пользователей
 /stats - статистика
 /vip_list - список VIP
 
 💎 ВЫДАТЬ VIP:
-/give_vip ID week - неделя (15 лей)
-/give_vip ID month - месяц (60 лей)
+/give_vip ID week - неделя
+/give_vip ID month - месяц
 /give_vip @username week - по юзернейму
 
 /remove_vip ID - снять VIP
@@ -274,19 +353,74 @@ def help_cmd(m):
 /help - этот список
 /status - мой статус
 /buy_vip - купить VIP
+/referral - моя реферальная ссылка
+/referrals - сколько друзей пригласил
 
 🎫 КУПИТЬ БИЛЕТ:
 Просто напиши номер (2000-2099)
+
+🎟 ПРОМОКОД:
+Используй кнопку "Промокод"
 
 📊 ТВОЙ СТАТУС:
 Сегодня: {daily}/{limit}
 
 💎 VIP ПАКЕТЫ:
 • НЕДЕЛЯ: 15 лей
-• МЕСЯЦ: 60 лей (скидка 40%!)
-10 билетов/день, без кулдауна
+• МЕСЯЦ: 60 лей
 """
     bot.send_message(uid, text)
+
+@bot.message_handler(commands=['referral'])
+def referral_cmd(m):
+    uid = m.from_user.id
+    link = get_referral_link(uid)
+    count = get_referral_count(uid)
+    text = f"🔗 Твоя реферальная ссылка:\n{link}\n\n👥 Приглашено друзей: {count}\n\nЗа 5 друзей → VIP на месяц БЕСПЛАТНО!"
+    bot.send_message(uid, text, reply_markup=user_menu(uid))
+
+@bot.message_handler(commands=['referrals'])
+def referrals_count_cmd(m):
+    uid = m.from_user.id
+    count = get_referral_count(uid)
+    bot.send_message(uid, f"👥 Ты пригласил {count} человек(а).\nОсталось {5 - count if count < 5 else 0} до VIP.", reply_markup=user_menu(uid))
+
+@bot.message_handler(commands=['create_promo'])
+def create_promo_cmd(m):
+    if str(m.from_user.id) != str(ADMIN_ID):
+        return
+    try:
+        parts = m.text.split()
+        if len(parts) != 3:
+            bot.send_message(ADMIN_ID, "❌ Используй: /create_promo КОД КОЛИЧЕСТВО\nПример: /create_promo SUPER10 100")
+            return
+        code = parts[1].upper()
+        uses = int(parts[2])
+        create_promocode(code, uses)
+        bot.send_message(ADMIN_ID, f"✅ Промокод {code} создан на {uses} использований")
+    except Exception as e:
+        bot.send_message(ADMIN_ID, f"❌ Ошибка: {e}")
+
+@bot.message_handler(func=lambda m: m.text == "🎟 Промокод")
+def promo_btn(m):
+    uid = m.from_user.id
+    if not user_access.get(str(uid), False):
+        bot.send_message(uid, "❌ Сначала /start", reply_markup=back_menu())
+        return
+    bot.send_message(uid, "🎟 Введи промокод:")
+    bot.register_next_step_handler(m, apply_promo)
+
+def apply_promo(m):
+    uid = m.from_user.id
+    code = m.text.strip().upper()
+    success, msg = use_promocode(uid, code)
+    if success:
+        # Активация промокода — можно добавить любую награду
+        # Например: +1 билет или скидка
+        bot.send_message(uid, f"✅ {msg}\nПромокод активирован! При следующей покупке билета будет скидка.")
+    else:
+        bot.send_message(uid, f"❌ {msg}")
+    bot.send_message(uid, "Вернулся в меню", reply_markup=user_menu(uid))
 
 @bot.message_handler(commands=['status'])
 def status_cmd(m):
@@ -304,6 +438,7 @@ def status_cmd(m):
 🎫 Осталось сегодня: {10-daily}/10
 ⏰ Кулдаун: отсутствует
 💰 Цена билета: {PRET} лей
+👥 Приглашено друзей: {get_referral_count(uid)}
 """
     else:
         last = user_cooldown.get(str(uid))
@@ -328,10 +463,11 @@ def status_cmd(m):
 📅 Сегодня: {daily}/{NORMAL_DAILY_LIMIT}
 {cooldown_text}
 💰 Цена билета: {PRET} лей
+👥 Приглашено друзей: {get_referral_count(uid)}
 
 💎 КУПИ VIP:
 • Неделя: 15 лей
-• Месяц: 60 лей (скидка 40%!)
+• Месяц: 60 лей
 Напиши /buy_vip
 """
     bot.send_message(uid, text, reply_markup=user_menu(uid))
@@ -356,7 +492,7 @@ def buy_vip_cmd(m):
         f"📝 Username: @{username if username else 'нет'}\n\n"
         f"💎 ПАКЕТЫ:\n"
         f"• НЕДЕЛЯ: {VIP_WEEK_PRICE} лей\n"
-        f"• МЕСЯЦ: {VIP_MONTH_PRICE} лей (скидка 40%!)\n\n"
+        f"• МЕСЯЦ: {VIP_MONTH_PRICE} лей\n\n"
         f"✅ ВЫДАТЬ VIP:\n/give_vip {uid} week\n/give_vip {uid} month")
     
     bot.send_message(uid, 
@@ -364,7 +500,7 @@ def buy_vip_cmd(m):
         f"🔥 **СПЕЦИАЛЬНОЕ ПРЕДЛОЖЕНИЕ!** 🔥\n\n"
         f"📦 **ПАКЕТЫ:**\n"
         f"• 🟢 НЕДЕЛЯ: {VIP_WEEK_PRICE} лей\n"
-        f"• 🔥 МЕСЯЦ: {VIP_MONTH_PRICE} лей (было 100, экономия 40 лей!)\n\n"
+        f"• 🔥 МЕСЯЦ: {VIP_MONTH_PRICE} лей (экономия 40 лей!)\n\n"
         f"🎫 **ПРЕИМУЩЕСТВА VIP:**\n"
         f"• 10 билетов в день\n"
         f"• Без кулдауна\n"
@@ -493,7 +629,8 @@ def users_cmd(m):
                 tickets = user_stats.get(uid, {}).get('tickets', 0)
                 vip = "💎" if is_vip(int(uid)) else "⭐"
                 name = user_names.get(uid, {}).get('name', uid)
-                text += f"{vip} {name} - {tickets} билетов\n"
+                refs = get_referral_count(int(uid))
+                text += f"{vip} {name} - {tickets} билетов, {refs} рефералов\n"
         bot.send_message(ADMIN_ID, text)
 
 @bot.message_handler(commands=['stats'])
@@ -502,6 +639,7 @@ def stats_cmd(m):
         active = len([u for u in user_access if user_access[u]])
         vip = len([u for u in user_vip if datetime.fromisoformat(user_vip[u]) > get_time()])
         total = sum([s.get('tickets', 0) for s in user_stats.values()])
+        total_refs = sum([len(user_referrals.get(uid, [])) for uid in user_referrals])
         text = f"""
 📊 СТАТИСТИКА
 
@@ -509,6 +647,7 @@ def stats_cmd(m):
 💎 VIP: {vip}
 🎫 Всего билетов: {total}
 💰 Выручка: {total * PRET} MDL
+👥 Всего рефералов: {total_refs}
 
 ⭐ Обычный лимит: {NORMAL_DAILY_LIMIT}/день
 ⏰ Обычный кулдаун: {NORMAL_COOLDOWN_HOURS} ч
@@ -655,6 +794,7 @@ def back_btn(m):
                 msg += f"⭐ Обычный: {NORMAL_DAILY_LIMIT} билетов/день\n"
                 msg += f"🎫 Сегодня: {get_daily_tickets_count(uid)}/{NORMAL_DAILY_LIMIT}\n\n"
                 msg += "Купи VIP: /buy_vip"
+            msg += f"\n\n👥 Приглашено друзей: {get_referral_count(uid)}"
             bot.send_message(uid, msg, reply_markup=user_menu(uid))
         else:
             bot.send_message(uid, "🔑 Введи код доступа")
@@ -662,6 +802,10 @@ def back_btn(m):
 @bot.message_handler(func=lambda m: m.text == "❓ Команды")
 def commands_btn(m):
     help_cmd(m)
+
+@bot.message_handler(func=lambda m: m.text == "👥 Рефералы")
+def referrals_btn(m):
+    referral_cmd(m)
 
 @bot.message_handler(func=lambda m: m.text == "🆕 Создать пароль" and str(m.from_user.id) == str(ADMIN_ID))
 def gen_pass_btn(m):
@@ -678,6 +822,10 @@ def clear_pass_btn(m):
 @bot.message_handler(func=lambda m: m.text == "💎 Выдать VIP" and str(m.from_user.id) == str(ADMIN_ID))
 def give_vip_btn(m):
     bot.send_message(ADMIN_ID, "💎 Используй:\n/give_vip @username week\n/give_vip @username month\n/give_vip ID week\n/give_vip ID month")
+
+@bot.message_handler(func=lambda m: m.text == "🎫 Создать промокод" and str(m.from_user.id) == str(ADMIN_ID))
+def create_promo_btn(m):
+    bot.send_message(ADMIN_ID, "🎫 Используй: /create_promo КОД КОЛИЧЕСТВО\nПример: /create_promo SUPER10 100")
 
 @bot.message_handler(func=lambda m: m.text == "📢 Рассылка" and str(m.from_user.id) == str(ADMIN_ID))
 def ad_btn(m):
@@ -704,14 +852,12 @@ if __name__ == "__main__":
     load_data()
     check_expired_vip()
     
-    # Фоновая проверка VIP
     def vip_checker():
         while True:
             time.sleep(21600)
             check_expired_vip()
     threading.Thread(target=vip_checker, daemon=True).start()
     
-    # Установка вебхука
     port = int(os.environ.get("PORT", 10000))
     webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'localhost')}/webhook/{TOKEN}"
     
@@ -719,7 +865,7 @@ if __name__ == "__main__":
     bot.set_webhook(url=webhook_url)
     
     print("=" * 50)
-    print("✅ БОТ ЗАПУЩЕН НА RENDER")
+    print("✅ БОТ ЗАПУЩЕН")
     print(f"👑 ADMIN ID: {ADMIN_ID}")
     print(f"🌐 Webhook: {webhook_url}")
     print("=" * 50)

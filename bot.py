@@ -1,5 +1,5 @@
 import telebot
-from flask import Flask
+from flask import Flask, request
 import threading
 import os
 import time
@@ -103,7 +103,10 @@ def check_expired_vip():
             pass
     if expired:
         save_data()
-        bot.send_message(ADMIN_ID, f"⏰ VIP истёк у {len(expired)} пользователей")
+        try:
+            bot.send_message(ADMIN_ID, f"⏰ VIP истёк у {len(expired)} пользователей")
+        except:
+            pass
     return len(expired)
 
 def get_daily_tickets_count(user_id):
@@ -158,14 +161,19 @@ def update_stats(user_id):
     user_stats[uid]['tickets'] += 1
     save_data()
 
+# ========== Flask Webhook ==========
 @app.route('/')
 def health():
     return "Bot is running!", 200
 
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+@app.route(f'/webhook/{TOKEN}', methods=['POST'])
+def webhook():
+    json_str = request.get_data().decode('UTF-8')
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return '!', 200
 
+# ========== Админ меню ==========
 def admin_menu():
     mk = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     mk.row("🆕 Создать пароль", "📋 Список паролей")
@@ -192,6 +200,7 @@ def back_menu():
     mk.row("🔙 Назад")
     return mk
 
+# ========== Обработчики ==========
 @bot.message_handler(commands=['start'])
 def start_cmd(m):
     uid = m.from_user.id
@@ -690,24 +699,29 @@ def buy_vip_btn(m):
 def status_btn(m):
     status_cmd(m)
 
-# ========== ЗАПУСК ==========
+# ========== ЗАПУСК С WEBHOOK ==========
 if __name__ == "__main__":
     load_data()
     check_expired_vip()
+    
+    # Фоновая проверка VIP
     def vip_checker():
         while True:
             time.sleep(21600)
             check_expired_vip()
     threading.Thread(target=vip_checker, daemon=True).start()
-    threading.Thread(target=run_web, daemon=True).start()
-    try:
-        bot.remove_webhook()
-    except:
-        pass
+    
+    # Установка вебхука
+    port = int(os.environ.get("PORT", 10000))
+    webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'localhost')}/webhook/{TOKEN}"
+    
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
+    
     print("=" * 50)
-    print("✅ БОТ ЗАПУЩЕН")
+    print("✅ БОТ ЗАПУЩЕН НА RENDER")
     print(f"👑 ADMIN ID: {ADMIN_ID}")
-    print(f"💎 VIP неделя: {VIP_WEEK_PRICE} лей / {VIP_WEEK_DAYS} дней")
-    print(f"🔥 VIP месяц: {VIP_MONTH_PRICE} лей / {VIP_MONTH_DAYS} дней (скидка 40% от 100)")
+    print(f"🌐 Webhook: {webhook_url}")
     print("=" * 50)
-    bot.infinity_polling(timeout=10)
+    
+    app.run(host='0.0.0.0', port=port)

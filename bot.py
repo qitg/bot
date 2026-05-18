@@ -5,7 +5,7 @@ import os
 import time
 import random
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 TOKEN = "8307596159:AAGkuxqO1WKToY_9k6nXegDqljFH45L-mmQ"
 ADMIN_ID = 7072265211
@@ -23,20 +23,20 @@ NORMAL_DAILY_LIMIT = 3
 NORMAL_COOLDOWN_HOURS = 3
 
 # ========== ДАННЫЕ ==========
-user_access = {}           # есть ли доступ у пользователя
-user_cooldown = {}         # время последнего билета
-parole_active = []         # активные коды доступа
-user_stats = {}            # статистика покупок
-user_vip = {}              # VIP статусы
-user_daily_tickets = {}    # счётчики билетов по дням
-user_names = {}            # имена и юзернеймы
-user_referrals = {}        # {user_id: [список приглашённых]}
-user_referred_by = {}      # {user_id: кто пригласил}
-promocodes = {}            # {код: {uses_left: int, created_by: int}}
+user_access = {}
+user_cooldown = {}
+parole_active = []
+user_stats = {}
+user_vip = {}
+user_daily_tickets = {}
+user_names = {}
+user_referrals = {}
+user_referred_by = {}
+promocodes = {}  # {код: {'uses_left': int, 'discount_percent': int, 'created_by': int}}
 DATA_FILE = "bot_data.json"
 
 def get_time():
-    return datetime.now()
+    return datetime.now(timezone(timedelta(hours=3)))  # Молдова UTC+3
 
 def load_data():
     global user_access, user_cooldown, parole_active, user_stats, user_vip, user_daily_tickets, user_names, user_referrals, user_referred_by, promocodes
@@ -100,23 +100,31 @@ def get_referral_link(user_id):
     return f"https://t.me/{bot.get_me().username}?start=ref_{user_id}"
 
 # ========== ПРОМОКОДЫ ==========
-def create_promocode(code, uses):
-    promocodes[code] = {'uses_left': uses, 'created_by': ADMIN_ID}
+def create_promocode(code, uses, discount_percent):
+    promocodes[code] = {
+        'uses_left': uses,
+        'discount_percent': discount_percent,
+        'created_by': ADMIN_ID
+    }
     save_data()
     return True
 
 def use_promocode(user_id, code):
     if code not in promocodes:
-        return False, "Промокод не найден"
+        return False, "Промокод не найден", 0
     if promocodes[code]['uses_left'] <= 0:
         del promocodes[code]
         save_data()
-        return False, "Промокод уже использован"
+        return False, "Промокод уже использован", 0
+    
+    discount = promocodes[code]['discount_percent']
     promocodes[code]['uses_left'] -= 1
+    
     if promocodes[code]['uses_left'] <= 0:
         del promocodes[code]
     save_data()
-    return True, f"Промокод активирован! Осталось использований: {promocodes.get(code, {}).get('uses_left', 0)}"
+    
+    return True, f"Промокод активирован! Скидка {discount}%", discount
 
 # ========== VIP И БИЛЕТЫ ==========
 def gen_parola():
@@ -328,7 +336,7 @@ def help_cmd(m):
 /gen_pass - создать пароль
 /list_pass - список паролей
 /clear_pass - удалить все пароли
-/create_promo код количество - создать промокод
+/create_promo код количество скидка% - создать промокод
 /users - список пользователей
 /stats - статистика
 /vip_list - список VIP
@@ -389,13 +397,17 @@ def create_promo_cmd(m):
         return
     try:
         parts = m.text.split()
-        if len(parts) != 3:
-            bot.send_message(ADMIN_ID, "❌ Используй: /create_promo КОД КОЛИЧЕСТВО\nПример: /create_promo SUPER10 100")
+        if len(parts) != 4:
+            bot.send_message(ADMIN_ID, "❌ Используй: /create_promo КОД КОЛИЧЕСТВО СКИДКА%\nПример: /create_promo SUPER10 100 20\n\nСкидка будет вычитаться из цены билета (6 лей)")
             return
         code = parts[1].upper()
         uses = int(parts[2])
-        create_promocode(code, uses)
-        bot.send_message(ADMIN_ID, f"✅ Промокод {code} создан на {uses} использований")
+        discount = int(parts[3])
+        if discount < 0 or discount > 100:
+            bot.send_message(ADMIN_ID, "❌ Скидка должна быть от 0 до 100%")
+            return
+        create_promocode(code, uses, discount)
+        bot.send_message(ADMIN_ID, f"✅ Промокод {code} создан на {uses} использований со скидкой {discount}%")
     except Exception as e:
         bot.send_message(ADMIN_ID, f"❌ Ошибка: {e}")
 
@@ -411,12 +423,59 @@ def promo_btn(m):
 def apply_promo(m):
     uid = m.from_user.id
     code = m.text.strip().upper()
-    success, msg = use_promocode(uid, code)
+    success, msg, discount = use_promocode(uid, code)
     if success:
-        bot.send_message(uid, f"✅ {msg}\nПромокод активирован! При следующей покупке билета будет скидка.")
+        # Сохраняем скидку для пользователя
+        user_discount[str(uid)] = discount
+        save_data()
+        bot.send_message(uid, f"✅ {msg}\nТвоя скидка {discount}% на следующую покупку билета!")
     else:
         bot.send_message(uid, f"❌ {msg}")
     bot.send_message(uid, "Вернулся в меню", reply_markup=user_menu(uid))
+
+# Добавляем словарь для хранения активных скидок пользователей
+user_discount = {}
+
+# Обновляем функцию issue_ticket с учётом скидки
+def issue_ticket(chat_id, user_id, cod):
+    try:
+        msg = bot.send_message(chat_id, "🔄 Обработка запроса...")
+        time.sleep(2)
+        bot.delete_message(chat_id, msg.message_id)
+        
+        now = get_time()
+        nr = random.randint(10000000, 99999999)
+        
+        # Проверяем скидку
+        discount = user_discount.get(str(user_id), 0)
+        price_after_discount = PRET
+        discount_text = ""
+        if discount > 0:
+            price_after_discount = PRET - int(PRET * discount / 100)
+            discount_text = f"\n💰 Скидка {discount}%: {price_after_discount} лей (было {PRET})"
+            # Скидка одноразовая, удаляем после использования
+            del user_discount[str(user_id)]
+            save_data()
+        else:
+            price_after_discount = PRET
+        
+        update_stats(user_id)
+        increment_daily_tickets(user_id)
+        if not is_vip(user_id) and str(user_id) != str(ADMIN_ID):
+            set_cooldown(user_id)
+        
+        ticket = f"""{cod}
+{now.strftime('%I:%M %p').lstrip('0')}
+
+Biletul electronic nr. {nr}
+{now.strftime('%d.%m.%Y')}
+Valabil 1 ora (de la {now.strftime('%H:%M')} Pret {price_after_discount} MDL{discount_text})
+
+Numarul de bord: {cod}"""
+        
+        bot.send_message(chat_id, ticket, reply_markup=user_menu(user_id))
+    except Exception as e:
+        bot.send_message(chat_id, f"Ошибка: {e}")
 
 @bot.message_handler(commands=['status'])
 def status_cmd(m):
@@ -689,21 +748,7 @@ def do_broadcast(m):
     bot.send_message(ADMIN_ID, f"✅ Отправлено {sent} пользователям")
 
 # ========== ПОКУПКА БИЛЕТА ==========
-def issue_ticket(chat_id, user_id, cod):
-    try:
-        msg = bot.send_message(chat_id, "🔄 Cererea dumneavoastră este în curs de procesare...")
-        time.sleep(2)
-        bot.delete_message(chat_id, msg.message_id)
-        now = get_time()
-        nr = random.randint(10000000, 99999999)
-        update_stats(user_id)
-        increment_daily_tickets(user_id)
-        if not is_vip(user_id) and str(user_id) != str(ADMIN_ID):
-            set_cooldown(user_id)
-        ticket = f"{cod}\n{now.strftime('%I:%M %p').lstrip('0')}\n\nCererea dumneavoastră procesare.\n\nBiletul electronic nr. {nr}\n{now.strftime('%d.%m.%Y')}\nValabil 1 ora (de la {now.strftime('%H:%M')} Pret {PRET} MDL)\n\nNumarul de bord: {cod}"
-        bot.send_message(chat_id, ticket, reply_markup=user_menu(user_id))
-    except Exception as e:
-        bot.send_message(chat_id, f"Ошибка: {e}")
+# Функция issue_ticket уже определена выше (с учётом скидки)
 
 @bot.message_handler(func=lambda m: m.text == "🎫 Купить билет")
 def buy_ticket_btn(m):
@@ -824,7 +869,7 @@ def give_vip_btn(m):
 
 @bot.message_handler(func=lambda m: m.text == "🎫 Создать промокод" and str(m.from_user.id) == str(ADMIN_ID))
 def create_promo_btn(m):
-    bot.send_message(ADMIN_ID, "🎫 Используй: /create_promo КОД КОЛИЧЕСТВО\nПример: /create_promo SUPER10 100")
+    bot.send_message(ADMIN_ID, "🎫 Используй: /create_promo КОД КОЛИЧЕСТВО СКИДКА%\nПример: /create_promo SUPER10 100 20\n\nСкидка будет вычитаться из цены билета (6 лей)")
 
 @bot.message_handler(func=lambda m: m.text == "📢 Рассылка" and str(m.from_user.id) == str(ADMIN_ID))
 def ad_btn(m):

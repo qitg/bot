@@ -76,7 +76,7 @@ def add_referral(user_id, referrer_id):
     if uid == rid:
         return False
     if uid in user_referred_by:
-        return False  # уже есть реферер
+        return False
     user_referred_by[uid] = rid
     if rid not in user_referrals:
         user_referrals[rid] = []
@@ -84,7 +84,6 @@ def add_referral(user_id, referrer_id):
         user_referrals[rid].append(uid)
     save_data()
     
-    # Проверка на получение VIP за 5 рефералов
     if len(user_referrals[rid]) >= 5 and not is_vip(int(rid)):
         set_vip(int(rid), 30)
         try:
@@ -119,7 +118,7 @@ def use_promocode(user_id, code):
     save_data()
     return True, f"Промокод активирован! Осталось использований: {promocodes.get(code, {}).get('uses_left', 0)}"
 
-# ========== ОСТАЛЬНЫЕ ФУНКЦИИ (VIP, БИЛЕТЫ И Т.Д.) ==========
+# ========== VIP И БИЛЕТЫ ==========
 def gen_parola():
     return str(random.randint(100000, 999999))
 
@@ -189,9 +188,8 @@ def increment_daily_tickets(user_id):
     save_data()
 
 def check_can_buy_ticket(user_id):
-    # Админ может покупать всегда (но для теста оставим лимиты)
-    # if str(user_id) == str(ADMIN_ID):
-    #     return True, 0, ""
+    if str(user_id) == str(ADMIN_ID):
+        return True, 0, ""
     
     if is_vip(user_id):
         daily_count = get_daily_tickets_count(user_id)
@@ -215,7 +213,7 @@ def check_can_buy_ticket(user_id):
 
 def set_cooldown(user_id):
     if str(user_id) == str(ADMIN_ID):
-        return  # админ без кулдауна
+        return
     user_cooldown[str(user_id)] = get_time().isoformat()
     save_data()
 
@@ -238,7 +236,7 @@ def webhook():
     bot.process_new_updates([update])
     return '!', 200
 
-# ========== МЕНЮ ==========
+# ========== КЛАВИАТУРЫ ==========
 def admin_menu():
     mk = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     mk.row("🆕 Создать пароль", "📋 Список паролей")
@@ -266,17 +264,15 @@ def back_menu():
     mk.row("🔙 Назад")
     return mk
 
-# ========== ОБРАБОТЧИКИ ==========
+# ========== ОСНОВНЫЕ ОБРАБОТЧИКИ ==========
 @bot.message_handler(commands=['start'])
 def start_cmd(m):
     uid = m.from_user.id
     name = m.from_user.first_name
     username = m.from_user.username
     
-    # Сохраняем пользователя
     user_names[str(uid)] = {'name': name, 'username': username}
     
-    # Проверка реферальной ссылки
     text = m.text.split()
     if len(text) > 1 and text[1].startswith('ref_'):
         referrer_id = int(text[1].replace('ref_', ''))
@@ -286,7 +282,9 @@ def start_cmd(m):
     save_data()
     
     if str(uid) == str(ADMIN_ID):
-        bot.send_message(uid, "🔐 Админ панель", reply_markup=admin_menu())
+        user_access[str(uid)] = True
+        save_data()
+        bot.send_message(uid, "🔐 Админ панель\n\n✅ Теперь ты можешь покупать билеты как обычный пользователь", reply_markup=admin_menu())
         return
     
     if user_access.get(str(uid), False):
@@ -415,8 +413,6 @@ def apply_promo(m):
     code = m.text.strip().upper()
     success, msg = use_promocode(uid, code)
     if success:
-        # Активация промокода — можно добавить любую награду
-        # Например: +1 билет или скидка
         bot.send_message(uid, f"✅ {msg}\nПромокод активирован! При следующей покупке билета будет скидка.")
     else:
         bot.send_message(uid, f"❌ {msg}")
@@ -509,6 +505,7 @@ def buy_vip_cmd(m):
         f"💬 Напиши какой пакет хочешь (неделя или месяц)",
         parse_mode='Markdown', reply_markup=back_menu())
 
+# ========== АДМИН КОМАНДЫ ==========
 def find_user_id_by_username(username):
     clean = username.replace('@', '').lower()
     for uid, data in user_names.items():
@@ -691,6 +688,7 @@ def do_broadcast(m):
                 pass
     bot.send_message(ADMIN_ID, f"✅ Отправлено {sent} пользователям")
 
+# ========== ПОКУПКА БИЛЕТА ==========
 def issue_ticket(chat_id, user_id, cod):
     try:
         msg = bot.send_message(chat_id, "🔄 Cererea dumneavoastră este în curs de procesare...")
@@ -778,6 +776,7 @@ def direct_ticket(m):
     else:
         bot.send_message(uid, f"❌ {cod} не в диапазоне 2000-2099", reply_markup=user_menu(uid))
 
+# ========== НАВИГАЦИЯ ==========
 @bot.message_handler(func=lambda m: m.text == "🔙 Назад")
 def back_btn(m):
     uid = m.from_user.id
@@ -847,7 +846,7 @@ def buy_vip_btn(m):
 def status_btn(m):
     status_cmd(m)
 
-# ========== ЗАПУСК С WEBHOOK ==========
+# ========== ЗАПУСК ==========
 if __name__ == "__main__":
     load_data()
     check_expired_vip()
